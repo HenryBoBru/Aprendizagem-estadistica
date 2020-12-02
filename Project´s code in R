@@ -391,14 +391,42 @@ theme_minimal()
 
 #################
 #### Implementacao de modelos
-
-#######
-### Regressao logistica (Tomou vacina gripe sazonal)
 db<-datos_trainT
+
+###### Verificar balanceamento de dados 
+#### Variavel: Tomou vacina gripe sazonal 
+tb_sea_vacine <- table(db$seasonal_vaccine)
+tb_sea_vacine
+prop.table(tb_sea_vacine) # balanced data
+
+#### Variavel: Tomou vacina gripe H1N1
+tb_h1n1_vacine <- table(db$h1n1_vaccine)
+tb_h1n1_vacine
+prop.table(tb_h1n1_vacine) # unbalanced data
+
+set.seed(889)
+db_positive_y <- db[db$h1n1_vaccine==1,] # balancear dados
+db_negative_y <- db[db$h1n1_vaccine==0,]
+db_negative_y <- sample_n(db_negative_y,dim(db_positive_y)[1])
+
+db_balanced <- rbind(db_positive_y,db_negative_y) # dados balanceados
+table(db_balanced$h1n1_vaccine)
+prop.table(table(db_balanced$h1n1_vaccine))
+
+######## Split datos treinamento e teste
+### Variavel: Tomou vacina gripe sazonal 
 set.seed(8878)
 split <- sample.split(db, SplitRatio = 0.7) 
 train_data <- subset(db, split == "TRUE") 
 test_data <- subset(db, split == "FALSE") 
+
+##### Variavel: Tomou vacina gripe H1N1
+split <- sample.split(db_balanced, SplitRatio = 0.7)  # gerar os dados de treinamento e teste
+train_data_balanced <- subset(db_balanced, split == "TRUE") 
+test_data_balanced <- subset(db_balanced, split == "FALSE")
+
+#######
+### Regressao logistica (Tomou vacina gripe sazonal)
 
 mod1 <- glm(seasonal_vaccine ~ h1n1_concern+
                   + h1n1_knowledge + behavioral_antiviral_meds + behavioral_avoidance
@@ -518,9 +546,108 @@ mod3_table_test
 round(mod3_prob_table_test,3)
 mod3_accuracy_test
 
-#######
-### Regressao logistica (Tomou vacina H1N1)
-db<-datos_trainT
+#########
+##### Regressao logistica (Tomou vacina H1N1)
 
+mod1_balanced <- glm(h1n1_vaccine ~ h1n1_concern+
+                  + h1n1_knowledge + behavioral_antiviral_meds + behavioral_avoidance
+            + behavioral_face_mask + behavioral_wash_hands + behavioral_large_gatherings
+            + behavioral_outside_home + behavioral_touch_face + doctor_recc_h1n1           
+            + doctor_recc_seasonal + chronic_med_condition + child_under_6_months
+            + health_worker + opinion_h1n1_vacc_effective + 
+                  + opinion_h1n1_risk + opinion_h1n1_sick_from_vacc + opinion_seas_vacc_effective
+            + opinion_seas_risk + opinion_seas_sick_from_vacc + age_group
+            + education+ race + sex + income_poverty
+            + marital_status + rent_or_own + household_adults
+            + household_children   
+            , data = train_data_balanced, family = binomial) 
 
+mod1_reduced <- stepAIC(mod1_balanced)
+mod1 <- mod1_reduced
+summary(mod1)
 
+mod1_predict_train <- ifelse(predict(mod1,newdata=train_data_balanced,type = "response") > 0.5, 1, 0)
+mod1_table_train <- table(train_data_balanced$h1n1_vaccine,mod1_predict_train)
+mod1_prob_table_train <- prop.table(mod1_table_train)
+mod1_accuracy_train <- (mod1_table_train[1] + mod1_table_train[4])/sum(mod1_table_train)
+mod1_table_train
+mod1_prob_table_train
+mod1_accuracy_train
+
+mod1_predict_test <- ifelse(predict(mod1,newdata=test_data_balanced,type="response") > 0.5,1,0)
+mod1_table_test  <- table(test_data_balanced$h1n1_vaccine,mod1_predict_test)
+mod1_prob_table_test <- prop.table(table(test_data_balanced$h1n1_vaccine,mod1_predict_test))
+mod1_accuracy_test <- (mod1_table_test[1] + mod1_table_test[4])/sum(mod1_table_test)
+mod1_table_test
+round(mod1_prob_table_test,3)
+mod1_accuracy_test
+
+####### 
+### Arvore de decisao (Varivel h1n1_vaccine)
+mod2_balanced <- rpart(as.factor(h1n1_vaccine) ~ 
+                    h1n1_concern+
+                    + h1n1_knowledge + behavioral_antiviral_meds + behavioral_avoidance
+              + behavioral_face_mask + behavioral_wash_hands + behavioral_large_gatherings
+              + behavioral_outside_home + behavioral_touch_face + doctor_recc_h1n1           
+              + doctor_recc_seasonal + chronic_med_condition + child_under_6_months
+              + health_worker + opinion_h1n1_vacc_effective + 
+                    + opinion_h1n1_risk + opinion_h1n1_sick_from_vacc + opinion_seas_vacc_effective
+              + opinion_seas_risk + opinion_seas_sick_from_vacc + age_group
+              + education+ race + sex + income_poverty
+              + marital_status + rent_or_own + household_adults
+              + household_children 
+              , data = train_data_balanced)
+
+rpart.plot(mod2)
+rpart.plot(mod2_balanced,type = 3)
+summary(mod2)
+mod2 <- mod2_balanced
+
+mod2_predict_train <- predict(mod2,type="class", newdata = train_data_balanced)
+mod2_table_train <- table(train_data_balanced$h1n1_vaccine,mod2_predict_train)
+mod2_prob_table_train <- prop.table(mod2_table_train)
+mod2_accuracy_train <- (mod2_table_train[1] + mod2_table_train[4])/sum(mod2_table_train)
+mod2_table_train
+mod2_prob_table_train
+mod2_accuracy_train
+
+mod2_predict_test <- predict(mod2,type="class", newdata = test_data_balanced)
+mod2_table_test  <- table(test_data_balanced$h1n1_vaccine,mod2_predict_test)
+mod2_prob_table_test <- prop.table(table(test_data_balanced$h1n1_vaccine,mod2_predict_test))
+mod2_accuracy_test <- sum(diag(mod2_table_test))/sum(mod2_table_test)
+mod2_table_test
+round(mod2_prob_table_test,3)
+round(mod2_accuracy_test,3)
+
+######
+### Naive bayes  (Varivel h1n1_vaccine)
+mod3_balanced <- naiveBayes(as.factor(seasonal_vaccine) ~      
+                         h1n1_concern+
+                         + h1n1_knowledge + behavioral_antiviral_meds + behavioral_avoidance
+                   + behavioral_face_mask + behavioral_wash_hands + behavioral_large_gatherings
+                   + behavioral_outside_home + behavioral_touch_face            
+                   + doctor_recc_seasonal + chronic_med_condition + child_under_6_months
+                   + health_worker + opinion_h1n1_vacc_effective + 
+                         + opinion_h1n1_risk + opinion_h1n1_sick_from_vacc + opinion_seas_vacc_effective
+                   + opinion_seas_risk + opinion_seas_sick_from_vacc + age_group
+                   + education+ race + sex + income_poverty
+                   + marital_status + rent_or_own + household_adults
+                   + household_children  
+                   , data = train_data_balanced)
+
+mod3 <- mod3_balanced
+mod3_predict_train <- predict(mod3,type="class", newdata = train_data_balanced)
+mod3_table_train <- table(train_data_balanced$h1n1_vaccine,mod3_predict_train)
+mod3_prob_table_train <- prop.table(mod3_table_train)
+mod3_accuracy_train <- (mod3_table_train[1] + mod3_table_train[4])/sum(mod3_table_train)
+mod3_table_train
+mod3_prob_table_train
+mod3_accuracy_train
+
+mod3_predict_test <- predict(mod3,type="class", newdata = test_data_balanced)
+mod3_table_test  <- table(test_data_balanced$h1n1_vaccine,mod3_predict_test)
+mod3_prob_table_test <- prop.table(table(test_data_balanced$h1n1_vaccine,mod3_predict_test))
+mod3_accuracy_test <- (mod3_table_test[1] + mod3_table_test[4])/sum(mod3_table_test)
+mod3_table_test
+round(mod3_prob_table_test,3)
+mod3_accuracy_test
