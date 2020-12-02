@@ -13,6 +13,8 @@ library(ggplot2)
 
 ##############
 #### Import data
+https://www.drivendata.org/competitions/66/ # dados percentem a competicao da Drivendata
+
 datosX_train<-read.csv("training_set_features.csv", sep = ",")
 datosY_train<-read.csv("training_set_labels.csv", sep = ",")
 datos_train<-data.frame(datosY_train, datosX_train) # juntar labels + features
