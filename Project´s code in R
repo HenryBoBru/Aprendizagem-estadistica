@@ -1,0 +1,526 @@
+##### 
+library(caTools)
+library(dplyr)
+library(rpart)
+library(rpart.plot)
+library(e1071) 
+library(caTools) 
+library(caret) 
+library(lmtest)
+library(corrplot)
+library(MASS)
+library(ggplot2)
+
+##############
+#### Import data
+datosX_train<-read.csv("training_set_features.csv", sep = ",")
+datosY_train<-read.csv("training_set_labels.csv", sep = ",")
+datos_train<-data.frame(datosY_train, datosX_train) # juntar labels + features
+row.names(datos_train)<-datos_train$respondent_id
+datos_train<-datos_train[,c(-1,-4)]
+
+##############
+#### Pre-processamento de dados (dados faltantes e conversao de variaveis)
+datos_train[datos_train == ""] <- NA # existem espaços em branco, colocar NA nos espaços em branco
+library(DataExplorer)
+plot_missing(datos_train) # grafico dados perdidos
+datos_trainT <- datos_train 
+
+datos_trainT$behavioral_antiviral_meds[is.na(datos_trainT$behavioral_antiviral_meds)]<-c(-1) # adicionar categoria -1 nas variaveis preditoras binarias 
+datos_trainT$behavioral_avoidance[is.na(datos_trainT$behavioral_avoidance)]<-c(-1)
+datos_trainT$behavioral_face_mask[is.na(datos_trainT$behavioral_face_mask)]<-c(-1)
+datos_trainT$behavioral_wash_hands[is.na(datos_trainT$behavioral_wash_hands)]<-c(-1)
+datos_trainT$behavioral_large_gatherings[is.na(datos_trainT$behavioral_large_gatherings)]<-c(-1)
+datos_trainT$behavioral_outside_home[is.na(datos_trainT$behavioral_outside_home)]<-c(-1)
+datos_trainT$behavioral_touch_face[is.na(datos_trainT$behavioral_touch_face)]<-c(-1)
+datos_trainT$health_worker[is.na(datos_trainT$health_worker)]<-c(-1)
+datos_trainT$child_under_6_months[is.na(datos_trainT$child_under_6_months)]<-c(-1)
+datos_trainT$doctor_recc_h1n1[is.na(datos_trainT$doctor_recc_h1n1)]<-c(-1)
+datos_trainT$doctor_recc_seasonal[is.na(datos_trainT$doctor_recc_seasonal)]<-c(-1)
+datos_trainT$chronic_med_condition[is.na(datos_trainT$chronic_med_condition)]<-c(-1)
+datos_trainT$health_insurance[is.na(datos_trainT$health_insurance)]<-c(-1)
+
+datos_trainT$h1n1_concern[is.na(datos_trainT$h1n1_concern)]<-as.numeric(median(datos_trainT$h1n1_concern, na.rm = TRUE)) # median 2
+datos_trainT$h1n1_knowledge[is.na(datos_trainT$h1n1_knowledge)]<-as.numeric(median(datos_trainT$h1n1_knowledge, na.rm = TRUE)) # median 1
+
+datos_trainT$household_adults[is.na(datos_trainT$household_adults)]<-median(datos_trainT$household_adults, na.rm = TRUE) # adicionar mediana nas variaveis numericas faltantes
+datos_trainT$household_children[is.na(datos_trainT$household_children)]<-median(datos_trainT$household_children, na.rm = TRUE) 
+
+datos_trainT$opinion_h1n1_vacc_effective[is.na(datos_trainT$opinion_h1n1_vacc_effective)]<-as.numeric(median(datos_trainT$opinion_h1n1_vacc_effective, na.rm = TRUE)) # adicionar mediana nas variveis categoricas ordinais faltantes
+datos_trainT$opinion_h1n1_risk[is.na(datos_trainT$opinion_h1n1_risk)]<-as.numeric(median(datos_trainT$opinion_h1n1_risk, na.rm = TRUE)) # 
+datos_trainT$opinion_h1n1_sick_from_vacc[is.na(datos_trainT$opinion_h1n1_sick_from_vacc)]<-as.numeric(median(datos_trainT$opinion_h1n1_sick_from_vacc, na.rm = TRUE)) # 
+datos_trainT$opinion_seas_vacc_effective[is.na(datos_trainT$opinion_seas_vacc_effective)]<-as.numeric(median(datos_trainT$opinion_seas_vacc_effective, na.rm = TRUE)) # 
+datos_trainT$opinion_seas_risk[is.na(datos_trainT$opinion_seas_risk)]<-as.numeric(median(datos_trainT$opinion_seas_risk, na.rm = TRUE)) # 
+datos_trainT$opinion_seas_sick_from_vacc[is.na(datos_trainT$opinion_seas_sick_from_vacc)]<-as.numeric(median(datos_trainT$opinion_seas_sick_from_vacc, na.rm = TRUE)) # 
+
+datos_trainT$education[datos_trainT$education=="< 12 Years"]<-1 # conversao das variaveis categoricas ordinais em categoricas numericas, e adicionar a mediana nos faltantes
+datos_trainT$education[datos_trainT$education=="12 Years"]<-2
+datos_trainT$education[datos_trainT$education=="Some College"]<-3
+datos_trainT$education[datos_trainT$education=="College Graduate"]<-4
+datos_trainT$education<-as.numeric(datos_trainT$education)
+datos_trainT$education[is.na(datos_trainT$education)]<-as.numeric(median(datos_trainT$education, na.rm = TRUE)) 
+datos_trainT$income_poverty[datos_trainT$income_poverty=="Below Poverty"]<-1 # conversao das variaveis categoricas ordinais em categoricas numericas, e adicionar a mediana nos faltantes
+datos_trainT$income_poverty[datos_trainT$income_poverty=="<= $75,000, Above Poverty"]<-2
+datos_trainT$income_poverty[datos_trainT$income_poverty=="> $75,000"]<-3
+datos_trainT$income_poverty<-as.numeric(datos_trainT$income_poverty)
+datos_trainT$income_poverty[is.na(datos_trainT$income_poverty)]<-as.numeric(median(datos_trainT$income_poverty,na.rm = TRUE ))
+datos_trainT$age_group[datos_trainT$age_group=="18 - 34 Years"]<-1 # conversao das variaveis categoricas ordinais em categoricas numericas, e adicionar a mediana nos faltantes
+datos_trainT$age_group[datos_trainT$age_group=="35 - 44 Years"]<-2
+datos_trainT$age_group[datos_trainT$age_group=="45 - 54 Years"]<-3
+datos_trainT$age_group[datos_trainT$age_group=="55 - 64 Years"]<-4
+datos_trainT$age_group[datos_trainT$age_group=="65+ Years"]<-5
+datos_trainT$age_group<-as.numeric(datos_trainT$age_group)
+
+datos_trainT$marital_status[is.na(datos_trainT$marital_status)]<-c("Not inform") # adicionar Not inform nas variaveis categoricas nominais faltantes
+datos_trainT$employment_status[is.na(datos_trainT$employment_status)]<-c("Not inform")
+datos_trainT$rent_or_own[is.na(datos_trainT$rent_or_own)]<-c("Not inform")
+datos_trainT$employment_industry[is.na(datos_trainT$employment_industry)]<-c("Not inform")
+datos_trainT$employment_occupation[is.na(datos_trainT$employment_occupation)]<-c("Not inform")
+
+##############
+## Set up factors
+datos_trainT$h1n1_concern<-as.factor(datos_trainT$h1n1_concern)
+datos_trainT$h1n1_knowledge<-as.factor(datos_trainT$h1n1_knowledge)
+datos_trainT$behavioral_antiviral_meds<-as.factor(datos_trainT$behavioral_antiviral_meds)
+datos_trainT$behavioral_avoidance<-as.factor(datos_trainT$behavioral_avoidance)
+datos_trainT$behavioral_face_mask<-as.factor(datos_trainT$behavioral_face_mask)
+datos_trainT$behavioral_wash_hands<-as.factor(datos_trainT$behavioral_wash_hands)
+datos_trainT$behavioral_large_gatherings<-as.factor(datos_trainT$behavioral_large_gatherings)
+datos_trainT$behavioral_outside_home<-as.factor(datos_trainT$behavioral_outside_home)
+datos_trainT$behavioral_touch_face<-as.factor(datos_trainT$behavioral_touch_face)
+datos_trainT$doctor_recc_h1n1<-as.factor(datos_trainT$doctor_recc_h1n1)
+datos_trainT$doctor_recc_seasonal<-as.factor(datos_trainT$doctor_recc_seasonal)
+datos_trainT$chronic_med_condition<-as.factor(datos_trainT$chronic_med_condition)
+datos_trainT$child_under_6_months<-as.factor(datos_trainT$child_under_6_months)
+datos_trainT$health_worker<-as.factor(datos_trainT$health_worker)
+datos_trainT$health_insurance<-as.factor(datos_trainT$health_insurance) # nao analisar
+datos_trainT$opinion_h1n1_vacc_effective<-as.factor(datos_trainT$opinion_h1n1_vacc_effective)
+datos_trainT$opinion_h1n1_risk<-as.factor(datos_trainT$opinion_h1n1_risk)
+datos_trainT$opinion_h1n1_sick_from_vacc<-as.factor(datos_trainT$opinion_h1n1_sick_from_vacc)
+datos_trainT$opinion_seas_vacc_effective<-as.factor(datos_trainT$opinion_seas_vacc_effective)
+datos_trainT$opinion_seas_risk<-as.factor(datos_trainT$opinion_seas_risk)
+datos_trainT$opinion_seas_sick_from_vacc<-as.factor(datos_trainT$opinion_seas_sick_from_vacc)
+datos_trainT$age_group<-as.factor(datos_trainT$age_group)
+datos_trainT$education<-as.factor(datos_trainT$education)
+datos_trainT$race<-as.factor(datos_trainT$race)
+datos_trainT$sex<-as.factor(datos_trainT$sex)
+datos_trainT$income_poverty<-as.factor(datos_trainT$income_poverty)
+datos_trainT$marital_status<-as.factor(datos_trainT$marital_status)
+datos_trainT$rent_or_own<-as.factor(datos_trainT$rent_or_own)
+datos_trainT$employment_status<-as.factor(datos_trainT$employment_status)
+datos_trainT$hhs_geo_region<-as.factor(datos_trainT$hhs_geo_region) 
+datos_trainT$census_msa<-as.factor(datos_trainT$census_msa)
+datos_trainT$employment_industry<-as.factor(datos_trainT$employment_industry) 
+datos_trainT$employment_occupation<-as.factor(datos_trainT$employment_occupation)
+
+##############
+### Estadistica descritiva
+datos_train_chi<-datos_trainT
+datos_train_chi$h1n1_vaccine<-as.factor(datos_train_chi$h1n1_vaccine) # converter a factor variavel resposta
+datos_train_chi$seasonal_vaccine<-as.factor(datos_train_chi$seasonal_vaccine) # converter a factor variavel resposta
+datos_train_chim<-data.frame(datos_train_chi[,c(1:2,5:16,3:4,18:25,28,26,27,29:33 )]) # Ordenar as colunas por tipos de variaveis: bina c(1:2, 5:16), ordi c(3:4,18:25, 28), nom c(26,27,29:33)
+
+### Grafico de barras das frequencias das tabelas de contingencia (variaves binarias)
+n<-1 # usar 1 quando analisar variavel "Tomou vacina H1N1", ou 2 quando analisar variavel "Tomou gripe sazonal" 
+a<-matrix(ncol=14,nrow=4)
+for (i in 3:14){
+    a[1,i-2]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                         as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                   margin = 2)[2,2]
+  a[2,i-2]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                         as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                   margin = 2)[1,2]
+  a[3,i-2]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                         as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                   margin = 2)[2,1]
+  a[4,i-2]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                         as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                   margin = 2)[1,1]
+}
+Percentagem<-round(c(a[,1],a[,2], a[,3],a[,4], a[,5],a[,6], a[,7],a[,8], a[,9],a[,10], a[,11],a[,12])*100,1)
+perc<-Percentagem
+perc_m<-c(perc[1], 99, perc[3], 99, perc[5], 99, perc[7], 99, perc[9], 99, perc[11], 99,
+          perc[13], 99, perc[15], 99, perc[17], 99, perc[19], 99, perc[21], 99, perc[23], 99,
+          perc[25], 99, perc[27], 99, perc[29], 99, perc[31], 99, perc[33], 99, perc[35], 99,
+          perc[37], 99, perc[39], 99, perc[41], 99, perc[43], 99, perc[45], 99, perc[47], 99)
+Preditoras <-c("Sim","Sim","Não","Não","Sim","Sim","Não","Não",
+        "Sim","Sim","Não","Não","Sim","Sim","Não","Não",
+        "Sim","Sim","Não","Não","Sim","Sim","Não","Não",
+        "Sim","Sim","Não","Não","Sim","Sim","Não","Não",
+        "Sim","Sim","Não","Não","Sim","Sim","Não","Não",
+        "Sim","Sim","Não","Não","Sim","Sim","Não","Não")
+coln<-colnames(datos_train_chim[,3:14])
+varG<-c(rep(coln[1],4), rep(coln[2],4), rep(coln[3],4),
+        rep(coln[4],4), rep(coln[5],4), rep(coln[6],4),
+        rep(coln[7],4), rep(coln[8],4), rep(coln[9],4),
+        rep(coln[10],4), rep(coln[11],4), rep(coln[12],4))
+Vacinado<-c("Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+          "Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+          "Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+          "Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+          "Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+          "Sim","Não","Sim","Não","Sim","Não","Sim","Não")
+graf<-data.frame(Preditoras,varG,Vacinado,Percentagem, perc_m)
+
+ggplot(data=graf[1:24,], aes(x=Preditoras, y=Percentagem, fill=Vacinado)) +  # Primeiras 6 variaveis binarias
+  geom_bar(stat="identity", position = 'stack') + facet_grid(~ varG) +
+  geom_text(aes(y=perc_m, label=Percentagem), vjust=1.0, 
+            color="black", size=3.5) +
+  scale_fill_brewer() 
+  theme_minimal()
+
+ggplot(data=graf[25:48,], aes(x=Preditoras, y=Percentagem, fill=Vacinado)) +  # Restantes variaveis binarias
+    geom_bar(stat="identity", position = 'stack') + facet_grid(~ varG) +
+    geom_text(aes(y=perc_m, label=Percentagem), vjust=1.0, 
+              color="Black", size=3.5) +
+    scale_fill_brewer() #
+  theme_minimal()
+
+### Grafico de barras das frequencias das tabelas de contingencia (variaves ordinais)
+## Variaveis ordinais de 5 categorias ("opinion_h1n1_vacc_effective" "opinion_h1n1_risk" "opinion_h1n1_sick_from_vacc""opinion_seas_vacc_effective" "opinion_seas_risk" "opinion_seas_sick_from_vacc" "age_group")
+n<-1 # usar 1 quando analisar variavel "Tomou vacina H1N1", ou 2 quando analisar variavel "Tomou gripe sazonal" 
+bi_ord<-matrix(ncol=7,nrow=10)
+  for (i in c(17:23)) { # binaria x ordinais, 5 levels
+   bi_ord[1,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                           as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                     margin = 2)[2,5]
+   bi_ord[2,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                           as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                     margin = 2)[1,5]
+   bi_ord[3,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                           as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                     margin = 2)[2,4]
+   bi_ord[4,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                           as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                     margin = 2)[1,4]
+   bi_ord[5,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                    as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                     margin = 2)[2,3]
+   bi_ord[6,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                    as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                      margin = 2)[1,3]
+   bi_ord[7,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                    as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                              margin = 2)[2,2]
+   bi_ord[8,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                    as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                              margin = 2)[1,2]
+   bi_ord[9,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                    as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                              margin = 2)[2,1]
+   bi_ord[10,i-16]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                    as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                              margin = 2)[1,1]
+ }
+
+Percentagem<-round(c(bi_ord[,1],bi_ord[,2], bi_ord[,3],bi_ord[,4], bi_ord[,5],bi_ord[,6], bi_ord[,7])*100,1)
+perc<-Percentagem
+perc_m<-c(perc[1], 99, perc[3], 99, perc[5], 99, perc[7], 99, perc[9], 99, perc[11], 99,
+          perc[13], 99, perc[15], 99, perc[17], 99, perc[19], 99, perc[21], 99, perc[23], 99,
+          perc[25], 99, perc[27], 99, perc[29], 99, perc[31], 99, perc[33], 99, perc[35], 99,
+          perc[37], 99, perc[39], 99, perc[41], 99, perc[43], 99, perc[45], 99, perc[47], 99,
+          perc[49], 99, perc[51], 99, perc[53], 99, perc[55], 99, perc[57], 99,  perc[59], 99,
+          perc[61], 99,  perc[63], 99,  perc[65], 99,  perc[67], 99,  perc[69], 99)
+
+Preditoras <-c("5","5","4","4","3","3","2","2","1","1",
+               "5","5","4","4","3","3","2","2","1","1",
+               "5","5","4","4","3","3","2","2","1","1",
+               "5","5","4","4","3","3","2","2","1","1",
+               "5","5","4","4","3","3","2","2","1","1",
+               "5","5","4","4","3","3","2","2","1","1",
+               "5","5","4","4","3","3","2","2","1","1")
+coln<-colnames(datos_train_chim[,17:23])
+varG<-c(rep(coln[1],10), rep(coln[2],10), rep(coln[3],10),
+        rep(coln[4],10), rep(coln[5],10), rep(coln[6],10),
+        rep(coln[7],10))
+Vacinado<-c("Sim","Não","Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não","Sim","Não","Sim","Não","Sim","Não")
+graf<-data.frame(Preditoras,varG,Vacinado,Percentagem, perc_m)
+
+ggplot(data=graf[1:40,], aes(x=Preditoras, y=Percentagem, fill=Vacinado)) + # Primeiras 4 variaveis ordinais
+  geom_bar(stat="identity", position = 'stack') + facet_grid(~ varG) +
+  geom_text(aes(y=perc_m, label=Percentagem), vjust=1.0, 
+            color="Black", size=3.5) +
+  scale_fill_brewer() #
+theme_minimal()
+
+ggplot(data=graf[41:70,], aes(x=Preditoras, y=Percentagem, fill=Vacinado)) + # Restantes variaveis
+  geom_bar(stat="identity", position = 'stack') + facet_grid(~ varG) +
+  geom_text(aes(y=perc_m, label=Percentagem), vjust=1.0, 
+            color="Black", size=3.5) +
+  scale_fill_brewer() #
+theme_minimal()
+
+## Variaveis ordinais de 4 categorias ("h1n1_concern" "education")
+n<-1  # usar 1 quando analisar variavel "Tomou vacina H1N1", ou 2 quando analisar variavel "Tomou gripe sazonal" 
+bi_ord<-matrix(ncol=10,nrow=8) # 4 levels
+for (i in c(15,24)) { # binaria x ordinal
+  bi_ord[1,i-14]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[2,4]
+  bi_ord[2,i-14]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[1,4]
+  bi_ord[3,i-14]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[2,3]
+  bi_ord[4,i-14]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[1,3]
+  bi_ord[5,i-14]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[2,2]
+  bi_ord[6,i-14]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[1,2]
+  bi_ord[7,i-14]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[2,1]
+  bi_ord[8,i-14]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[1,1]
+}
+Percentagem<-round(c(bi_ord[,1],bi_ord[,10])*100,1)
+perc<-Percentagem
+perc_m<-c(perc[1], 99, perc[3], 99, perc[5], 99, perc[7], 99, perc[9], 99, perc[11], 99,
+          perc[13], 99, perc[15], 99)
+
+Preditoras <-c("3","3","2","2","1","1","0","0",
+               "3","3","2","2","1","1","0","0")
+coln<-colnames(datos_train_chim[,c(15,24)])
+varG<-c(rep(coln[1],8), rep(coln[2],8))
+Vacinado<-c("Sim","Não","Sim","Não","Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não","Sim","Não","Sim","Não")
+graf<-data.frame(Preditoras,varG,Vacinado,Percentagem, perc_m)
+
+ggplot(data=graf, aes(x=Preditoras, y=Percentagem, fill=Vacinado)) +
+  geom_bar(stat="identity", position = 'stack') + facet_grid(~ varG) +
+  geom_text(aes(y=perc_m, label=Percentagem), vjust=1.0, 
+            color="Black", size=3.5) +
+  scale_fill_brewer() #
+theme_minimal()
+
+## Variaveis ordinais de 3 categorias ("h1n1_knowledge" "income_poverty")
+n<-1  # usar 1 quando analisar variavel "Tomou vacina H1N1", ou 2 quando analisar variavel "Tomou gripe sazonal" 
+bi_ord<-matrix(ncol=10,nrow=6) # 3 levels
+for (i in c(16,25)) { # binaria x ordinal
+  bi_ord[1,i-15]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[2,3]
+  bi_ord[2,i-15]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[1,3]
+  bi_ord[3,i-15]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[2,2]
+  bi_ord[4,i-15]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[1,2]
+  bi_ord[5,i-15]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[2,1]
+  bi_ord[6,i-15]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1  & datos_train_chim[,i] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,n] !=-1 & datos_train_chim[,i] !=-1,i]))),
+                             margin = 2)[1,1]
+  }
+Percentagem<-round(c(bi_ord[,1],bi_ord[,10])*100,1)
+perc<-Percentagem
+perc_m<-c(perc[1], 99, perc[3], 99, perc[5], 99, perc[7], 99, perc[9], 99, perc[11], 99)
+          
+Preditoras <-c("3","3","2","2","1","1",
+               "3","3","2","2","1","1")
+coln<-colnames(datos_train_chim[,c(16,25)])
+varG<-c(rep(coln[1],6), rep(coln[2],6))
+Vacinado<-c("Sim","Não","Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não","Sim","Não")
+graf<-data.frame(Preditoras,varG,Vacinado,Percentagem, perc_m)
+
+ggplot(data=graf, aes(x=Preditoras, y=Percentagem, fill=Vacinado)) +
+  geom_bar(stat="identity", position = 'stack') + facet_grid(~ varG) +
+  geom_text(aes(y=perc_m, label=Percentagem), vjust=1.0, 
+            color="Black", size=3.5) +
+  scale_fill_brewer() #
+theme_minimal()
+
+### Grafico de barras das frequencias das tabelas de contingencia (variaves nominais)
+bi_ord<-matrix(ncol=3,nrow=4)
+n<-1 # usar 1 quando analisar variavel "Tomou vacina H1N1", ou 2 quando analisar variavel "Tomou gripe sazonal" 
+for (i in c(27:29)) { # binaria x ordinal, 2 levels
+  bi_ord[1,i-26]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,i] !="Not inform" & datos_train_chim[,n] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,i] !="Not inform" & datos_train_chim[,n] !=-1,i]))),
+                             margin = 2)[2,2]
+  bi_ord[2,i-26]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,i] !="Not inform" & datos_train_chim[,n] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,i] !="Not inform" & datos_train_chim[,n] !=-1,i]))),
+                             margin = 2)[1,2]
+  bi_ord[3,i-26]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,i] !="Not inform" & datos_train_chim[,n] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,i] !="Not inform" & datos_train_chim[,n] !=-1,i]))),
+                             margin = 2)[2,1]
+  bi_ord[4,i-26]<-prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,i] !="Not inform" & datos_train_chim[,n] !=-1,n])), 
+                                   as.factor(as.character(datos_train_chim[datos_train_chim[,i] !="Not inform" & datos_train_chim[,n] !=-1,i]))),
+                             margin = 2)[1,1]
+}
+prop.table(table(as.factor(as.character(datos_train_chim[datos_train_chim[,29] !="Not inform" & datos_train_chim[,n] !=-1,n])), 
+                                 as.factor(as.character(datos_train_chim[datos_train_chim[,29] !="Not inform" & datos_train_chim[,n] !=-1,29]))),
+                           margin = 2)
+Percentagem<-round(c(bi_ord[,1],bi_ord[,2],bi_ord[,3])*100,1)
+perc<-Percentagem
+perc_m<-c(perc[1], 99, perc[3], 99, perc[5], 99, perc[7], 99, perc[9], 99, perc[11], 99)
+
+Preditoras <-c("Homem","Homem","Mulher", "Mulher",
+               "Solteiro","Solteiro","Casado","Casado",
+               "Alugada","Alugada","Propia","Propia")
+               
+coln<-colnames(datos_train_chim[,c(27:29)])
+varG<-c(rep(coln[1],4), rep(coln[2],4), rep(coln[3],4))
+Vacinado<-c("Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não",
+            "Sim","Não","Sim","Não")
+graf<-data.frame(Preditoras,varG,Vacinado,Percentagem, perc_m)
+
+ggplot(data=graf, aes(x=Preditoras, y=Percentagem, fill=Vacinado)) +
+  geom_bar(stat="identity", position = 'stack') + facet_grid(~ varG) +
+  geom_text(aes(y=perc_m, label=Percentagem), vjust=1.0, 
+            color="Black", size=3.5) +
+  scale_fill_brewer() #
+theme_minimal()
+
+#################
+#### Implementacao de modelos
+
+#######
+### Regressao logistica (Tomou vacina gripe sazonal)
+db<-datos_trainT
+set.seed(8878)
+split <- sample.split(db, SplitRatio = 0.7) 
+train_data <- subset(db, split == "TRUE") 
+test_data <- subset(db, split == "FALSE") 
+
+mod1 <- glm(seasonal_vaccine ~ h1n1_concern+
+                  + h1n1_knowledge + behavioral_antiviral_meds + behavioral_avoidance
+            + behavioral_face_mask + behavioral_wash_hands + behavioral_large_gatherings
+            + behavioral_outside_home + behavioral_touch_face + doctor_recc_h1n1           
+            + doctor_recc_seasonal + chronic_med_condition + child_under_6_months
+            + health_worker + opinion_h1n1_vacc_effective + 
+                  + opinion_h1n1_risk + opinion_h1n1_sick_from_vacc + opinion_seas_vacc_effective
+            + opinion_seas_risk + opinion_seas_sick_from_vacc + age_group
+            + education+ race + sex + income_poverty
+            + marital_status + rent_or_own + household_adults
+            + household_children   
+            , data = train_data, family = binomial) 
+
+mod1_reduced <- stepAIC(mod1)
+
+summary(mod1)
+plot(mod1$residuals)
+hist(mod1$residuals)
+qqnorm(mod1$residuals)
+
+#normalidade dos residuos
+shapiro.test(sample(mod1$residuals,2000))
+
+#variancia constante
+bptest(mod1)
+
+#change variable mod1 == mod reduced
+mod1_completed <- mod1
+mod1 <- mod1_reduced
+summary(mod1)
+
+mod1_predict_train <- ifelse(predict(mod1,type = "response") > 0.5, 1, 0)
+mod1_table_train <- table(train_data$seasonal_vaccine,mod1_predict_train)
+mod1_prob_table_train <- prop.table(mod1_table_train)
+mod1_accuracy_train <- (mod1_table_train[1] + mod1_table_train[4])/sum(mod1_table_train)
+mod1_table_train
+mod1_prob_table_train
+mod1_accuracy_train
+
+mod1_predict_test <- ifelse(predict(mod1,newdata=test_data,type="response") > 0.5,1,0)
+mod1_table_test  <- table(test_data$seasonal_vaccine,mod1_predict_test)
+mod1_prob_table_test <- prop.table(table(test_data$seasonal_vaccine,mod1_predict_test))
+mod1_accuracy_test <- (mod1_table_test[1] + mod1_table_test[4])/sum(mod1_table_test)
+mod1_table_test
+round(mod1_prob_table_test,3)
+mod1_accuracy_test
+
+plot(mod1)
+
+######## 
+## Arvore de decisao (seasonal_vaccine)
+mod2 <- rpart(as.factor(seasonal_vaccine) ~ 
+                             h1n1_concern+
+                    + h1n1_knowledge + behavioral_antiviral_meds + behavioral_avoidance
+                    + behavioral_face_mask + behavioral_wash_hands + behavioral_large_gatherings
+                    + behavioral_outside_home + behavioral_touch_face + doctor_recc_h1n1           
+                    + doctor_recc_seasonal + chronic_med_condition + child_under_6_months
+                    + health_worker + opinion_h1n1_vacc_effective + 
+                    + opinion_h1n1_risk + opinion_h1n1_sick_from_vacc + opinion_seas_vacc_effective
+                    + opinion_seas_risk + opinion_seas_sick_from_vacc + age_group
+                    + education+ race + sex + income_poverty
+                    + marital_status + rent_or_own + household_adults
+                    + household_children 
+                     , data = train_data)
+
+rpart.plot(mod2)
+rpart.plot(mod2,type = 3)
+summary(mod2)
+
+mod2_predict_train <- predict(mod2,type="class", newdata = train_data)
+mod2_table_train <- table(train_data$seasonal_vaccine,mod2_predict_train)
+mod2_prob_table_train <- prop.table(mod2_table_train)
+mod2_accuracy_train <- (mod2_table_train[1] + mod2_table_train[4])/sum(mod2_table_train)
+mod2_table_train
+mod2_prob_table_train
+mod2_accuracy_train
+
+mod2_predict_test <- predict(mod2,type="class", newdata = test_data)
+mod2_table_test  <- table(test_data$seasonal_vaccine,mod2_predict_test)
+mod2_prob_table_test <- prop.table(table(test_data$seasonal_vaccine,mod2_predict_test))
+mod2_accuracy_test <- sum(diag(mod2_table_test))/sum(mod2_table_test)
+mod2_table_test
+round(mod2_prob_table_test,3)
+mod2_accuracy_test
+
+#########
+### Naive bayes (seasonal_vaccine)
+mod3 <- naiveBayes(as.factor(seasonal_vaccine) ~      
+                         h1n1_concern+
+                         + h1n1_knowledge + behavioral_antiviral_meds + behavioral_avoidance
+                   + behavioral_face_mask + behavioral_wash_hands + behavioral_large_gatherings
+                   + behavioral_outside_home + behavioral_touch_face            
+                   + doctor_recc_seasonal + chronic_med_condition + child_under_6_months
+                   + health_worker + opinion_h1n1_vacc_effective + 
+                         + opinion_h1n1_risk + opinion_h1n1_sick_from_vacc + opinion_seas_vacc_effective
+                   + opinion_seas_risk + opinion_seas_sick_from_vacc + age_group
+                   + education+ race + sex + income_poverty
+                   + marital_status + rent_or_own + household_adults
+                   + household_children  
+                   , data = train_data)
+
+
+mod3_predict_train <- predict(mod3,type="class", newdata = train_data)
+mod3_table_train <- table(train_data$seasonal_vaccine,mod3_predict_train)
+mod3_prob_table_train <- prop.table(mod3_table_train)
+mod3_accuracy_train <- (mod3_table_train[1] + mod3_table_train[4])/sum(mod3_table_train)
+mod3_table_train
+mod3_prob_table_train
+mod3_accuracy_train
+
+mod3_predict_test <- predict(mod3,type="class", newdata = test_data)
+mod3_table_test  <- table(test_data$seasonal_vaccine,mod3_predict_test)
+mod3_prob_table_test <- prop.table(table(test_data$seasonal_vaccine,mod3_predict_test))
+mod3_accuracy_test <- (mod3_table_test[1] + mod3_table_test[4])/sum(mod3_table_test)
+mod3_table_test
+round(mod3_prob_table_test,3)
+mod3_accuracy_test
+
+#######
+### Regressao logistica (Tomou vacina H1N1)
+db<-datos_trainT
+
+
+
